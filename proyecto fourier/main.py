@@ -1,13 +1,16 @@
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.staticfiles import StaticFiles
+from fastapi.responses import FileResponse
 from pydantic import BaseModel
 import numpy as np
 import sympy as sp
 from scipy.integrate import quad
-import math
+import os
 
 app = FastAPI()
 
+# Permitir CORS para desarrollo local
 app.add_middleware(
     CORSMiddleware,
     allow_origins=["*"],
@@ -17,22 +20,19 @@ app.add_middleware(
 )
 
 class FourierRequest(BaseModel):
-    funcion: str  # Ejemplo: "Piecewise((1, (x>=0) & (x<=1)), (-1, (x>-1) & (x<=0)))"
+    funcion: str 
     armonicos: int
-    L: float = 1.0 # El periodo en el ejercicio 4 es [-1, 1], así que L=1
+    L: float = 1.0 
 
 @app.post("/calcular")
 def calcular_fourier(req: FourierRequest):
     x_sym = sp.Symbol('x')
     
     try:
-        # SymPy permite interpretar funciones definidas por partes (Piecewise)
-        # y funciones absolutas (Abs)
         f_sym = sp.sympify(req.funcion)
         f_num = sp.lambdify(x_sym, f_sym, "numpy")
         
         def f(x_val):
-            # Usamos np.piecewise o vectorizamos la función para que funcione con arrays de Numpy
             if isinstance(x_val, np.ndarray):
                 return np.array([f_num(val) for val in x_val])
             return f_num(x_val)
@@ -47,10 +47,9 @@ def calcular_fourier(req: FourierRequest):
     a0_int, _ = quad(lambda x: f(x), -L, L, limit=100)
     a0 = (1/L) * a0_int
 
-    # 2. Cálculo de an y bn hasta el armónico N
+    # 2. Cálculo de an y bn
     coeficientes = []
     for n in range(1, N + 1):
-        # La fórmula incluye L. En este caso L=1, por lo que queda n*pi*x
         an_int, _ = quad(lambda x: f(x) * np.cos(n * np.pi * x / L), -L, L, limit=100)
         bn_int, _ = quad(lambda x: f(x) * np.sin(n * np.pi * x / L), -L, L, limit=100)
         
@@ -58,14 +57,10 @@ def calcular_fourier(req: FourierRequest):
         bn = (1/L) * bn_int
         coeficientes.append({"n": n, "an": round(an, 5), "bn": round(bn, 5)})
 
-    # 3. Generación de puntos para las gráficas. 
-    # El ejercicio pide graficar en el intervalo [-2, 2]
+    # 3. Generación de puntos para las gráficas
     x_vals = np.linspace(-2, 2, 400)
     
-    # IMPORTANTE: Para graficar la función original periódica más allá de [-L, L], 
-    # necesitamos crear una versión periódica de f(x).
     def f_periodica(x):
-        # Mapea cualquier x al intervalo [-L, L)
         x_mod = ((x + L) % (2 * L)) - L
         return f(x_mod)
         
@@ -85,3 +80,12 @@ def calcular_fourier(req: FourierRequest):
             "y_aprox": y_aprox.tolist()
         }
     }
+
+# --- SERVIR FRONTEND ---
+# Esto sirve el index.html en la raíz del sitio
+@app.get("/")
+def read_index():
+    return FileResponse('index.html')
+
+# Esto sirve archivos como script.js y style.css si están en la misma carpeta
+app.mount("/", StaticFiles(directory="."), name="static")
